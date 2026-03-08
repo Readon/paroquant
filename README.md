@@ -109,22 +109,12 @@ Want a model that's not listed? [Open an issue](https://github.com/z-lab/paroqua
 > The main branch of this repository is under active development, and reproducibility is not guaranteed.
 > Please use the [`legacy`](https://github.com/z-lab/paroquant/tree/legacy) branch to reproduce results from the paper.
 
-## Installation
-
-```bash
-git clone https://github.com/z-lab/paroquant && cd paroquant
-
-pip install -e ".[vllm]"            # vLLM backend (GPU, recommended)
-pip install -e ".[transformers]"    # Transformers backend (GPU)
-pip install -e ".[mlx]"             # MLX backend (Apple Silicon)
-pip install -e ".[optim,eval]"      # Optimization & evaluation
-```
-
-Or use Docker: `docker run -it --gpus all --ipc=host ghcr.io/z-lab/paroquant:latest`
-
 ## Quantize Your Own Model
 
 ```bash
+git clone https://github.com/z-lab/paroquant && cd paroquant
+pip install -e ".[optim,eval]"
+
 # 1. Optimize rotation parameters
 experiments/optimize/4bit.sh Qwen/Qwen3-8B
 
