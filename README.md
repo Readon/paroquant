@@ -27,7 +27,7 @@ pip install "paroquant[vllm]"
 
 # NVIDIA GPU (CUDA 13.0)
 pip install "paroquant[vllm]" "vllm==0.19.0" \
-  --extra-index-url https://wheels.vllm.ai/2a69949bdadf0e8942b7a1619b229cb475beef20/cu130 \
+  --extra-index-url https://wheels.vllm.ai/0.19.0/cu130 \
   --extra-index-url https://download.pytorch.org/whl/cu130
 
 # Apple Silicon
