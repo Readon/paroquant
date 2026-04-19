@@ -88,6 +88,10 @@ class Config:
 
     use_wandb: bool = False
 
+    # Data type used for model loading and inference passes.
+    # Choose float16 for sm75/Turing GPUs that lack native bfloat16 support.
+    dtype: Literal["float16", "bfloat16"] = "float16"
+
 
 def setup_wandb(args: Config) -> wandb.Run | None:
     if not args.use_wandb:
@@ -115,6 +119,9 @@ def main():
 
     wandb_run = setup_wandb(args)
 
+    _DTYPE_MAP = {"float16": torch.float16, "bfloat16": torch.bfloat16}
+    model_dtype = _DTYPE_MAP[args.dtype]
+
     # Determine which params to optimize.
     params_to_optimize: list[dict[str, float]] = []
     for params in args.params:
@@ -131,7 +138,7 @@ def main():
         json.dump(vars(args), f, indent=2)
 
     # Load model.
-    model = load_model(args.model, device_map="cpu", dtype=torch.float16)
+    model = load_model(args.model, device_map="cpu", dtype=model_dtype)
     move_embed(model, device)
     tokenizer = load_tokenizer(args.model)
     blocks = get_blocks(model)
@@ -184,18 +191,20 @@ def main():
         input_batched: list[torch.Tensor],
         kwargs: dict,
         store_device: torch.device,
-        dtype: torch.dtype = torch.float16,
-        cast_to_dtype: torch.dtype = torch.float16,
+        dtype: torch.dtype | None = None,
+        cast_to_dtype: torch.dtype | None = None,
     ) -> list[torch.Tensor]:
+        _dtype = dtype if dtype is not None else model_dtype
+        _cast_to_dtype = cast_to_dtype if cast_to_dtype is not None else model_dtype
         output_batched = []
 
-        layer.to(device).to(dtype=dtype)
+        layer.to(device).to(dtype=_dtype)
         for input_batch in input_batched:
-            output = layer(input_batch.to(dtype).to(device), **kwargs)
+            output = layer(input_batch.to(_dtype).to(device), **kwargs)
             if isinstance(output, tuple):
                 output = output[0]
-            if output.dtype != cast_to_dtype:
-                output = output.to(cast_to_dtype)
+            if output.dtype != _cast_to_dtype:
+                output = output.to(_cast_to_dtype)
             if output.device != store_device:
                 output = output.to(store_device)
             output_batched.append(output)
@@ -454,7 +463,7 @@ def main():
         else:
             logger.info(f"Skipping optimization for layer {layer_idx}: already been optimized.")
 
-        layer.half().to(device)
+        layer.to(dtype=model_dtype).to(device)
 
         logger.info("Capturing new layer output...")
         new_layer_output_batches = forward_layer_batch(

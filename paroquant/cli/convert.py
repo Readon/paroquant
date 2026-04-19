@@ -106,8 +106,8 @@ def _write_config_json(
     output_cfg.write_text(json.dumps(config, indent=2) + "\n")
 
 
-def _load_model(model_id: str, device_map: str = "cpu") -> torch.nn.Module:
-    kwargs = dict(torch_dtype=torch.float16, device_map=device_map, low_cpu_mem_usage=True, trust_remote_code=True)
+def _load_model(model_id: str, device_map: str = "cpu", dtype: torch.dtype = torch.float16) -> torch.nn.Module:
+    kwargs = dict(torch_dtype=dtype, device_map=device_map, low_cpu_mem_usage=True, trust_remote_code=True)
     try:
         return AutoModelForImageTextToText.from_pretrained(model_id, **kwargs)
     except (ValueError, KeyError):
@@ -167,6 +167,7 @@ def _quantize_rotated_weight(
     bits: int,
     group_size: int,
     device: str,
+    dtype: torch.dtype = torch.float16,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     from paroquant.kernels.cuda import scaled_pairwise_rotation
 
@@ -196,11 +197,12 @@ def _to_awq_buffers(
     quantized: torch.Tensor,
     scales_2d: torch.Tensor,
     zeros_2d: torch.Tensor,
+    dtype: torch.dtype = torch.float16,
 ) -> dict[str, torch.Tensor]:
     return {
         "qweight": _pack_awq(quantized.T.contiguous()).cpu(),
         "qzeros": _pack_awq(zeros_2d.T.contiguous()).cpu(),
-        "scales": scales_2d.T.contiguous().to(torch.float16).cpu(),
+        "scales": scales_2d.T.contiguous().to(dtype).cpu(),
     }
 
 
@@ -238,7 +240,7 @@ def _convert_pseudo(model: torch.nn.Module, result_dir: Path) -> int:
 
 
 @torch.no_grad()
-def _quantize_layer(state_dict: dict, device: str) -> tuple[dict[str, torch.Tensor], int, int, int]:
+def _quantize_layer(state_dict: dict, device: str, dtype: torch.dtype = torch.float16) -> tuple[dict[str, torch.Tensor], int, int, int]:
     weight = state_dict["weight"].to(device=device, dtype=torch.float32)
 
     bits = int(_get_value(state_dict, "n_bits", "quantizer.n_bits"))
@@ -260,20 +262,21 @@ def _quantize_layer(state_dict: dict, device: str) -> tuple[dict[str, torch.Tens
         bits=bits,
         group_size=group_size,
         device=device,
+        dtype=dtype,
     )
 
-    channel_scales = (1.0 / channel_scales_opt).to(torch.float16).cpu()
+    channel_scales = (1.0 / channel_scales_opt).to(dtype).cpu()
     if channel_scales.ndim == 1:
         channel_scales = channel_scales.unsqueeze(0)
 
     buffers: dict[str, torch.Tensor] = {
-        **_to_awq_buffers(quantized, scales_2d, zeros_2d),
-        "theta": theta.to(torch.float16).cpu(),
+        **_to_awq_buffers(quantized, scales_2d, zeros_2d, dtype),
+        "theta": theta.to(dtype).cpu(),
         "pairs": pairs.cpu(),
         "channel_scales": channel_scales,
     }
     if "bias" in state_dict and state_dict["bias"] is not None:
-        buffers["bias"] = state_dict["bias"].to(torch.float16).cpu()
+        buffers["bias"] = state_dict["bias"].to(dtype).cpu()
 
     return buffers, bits, group_size, int(theta.shape[0])
 
@@ -282,6 +285,7 @@ def _quantize_layer(state_dict: dict, device: str) -> tuple[dict[str, torch.Tens
 def _quantize_moe(
     state_dict: dict,
     device: str,
+    dtype: torch.dtype = torch.float16,
 ) -> tuple[dict[str, dict[str, torch.Tensor]], dict[str, torch.Tensor], int, int, int]:
     bits = int(_get_value(state_dict, "n_bits", "quantizer.n_bits"))
     group_size = int(_get_value(state_dict, "group_size", "quantizer.group_size"))
@@ -317,6 +321,7 @@ def _quantize_moe(
         bits=bits,
         group_size=group_size,
         device=device,
+        dtype=dtype,
     )
     down_q, down_sc, down_zp = _quantize_rotated_weight(
         weight=down.reshape(-1, down_in),
@@ -328,6 +333,7 @@ def _quantize_moe(
         bits=bits,
         group_size=group_size,
         device=device,
+        dtype=dtype,
     )
 
     half = gate_up_out // 2
@@ -349,30 +355,30 @@ def _quantize_moe(
         ("down_proj", down_q, down_sc, down_zp),
     ):
         proj_buffers[proj]["qweight"] = torch.stack(
-            [_to_awq_buffers(q_rows[e], sc_rows[e], zp_rows[e])["qweight"] for e in range(num_experts)],
+            [_to_awq_buffers(q_rows[e], sc_rows[e], zp_rows[e], dtype)["qweight"] for e in range(num_experts)],
             dim=0,
         )
         proj_buffers[proj]["qzeros"] = torch.stack(
-            [_to_awq_buffers(q_rows[e], sc_rows[e], zp_rows[e])["qzeros"] for e in range(num_experts)],
+            [_to_awq_buffers(q_rows[e], sc_rows[e], zp_rows[e], dtype)["qzeros"] for e in range(num_experts)],
             dim=0,
         )
         proj_buffers[proj]["scales"] = torch.stack(
-            [_to_awq_buffers(q_rows[e], sc_rows[e], zp_rows[e])["scales"] for e in range(num_experts)],
+            [_to_awq_buffers(q_rows[e], sc_rows[e], zp_rows[e], dtype)["scales"] for e in range(num_experts)],
             dim=0,
         )
 
-    gate_up_channel_scales_inv = (1.0 / gate_up_channel_scales).to(torch.float16).cpu()
-    down_channel_scales_inv = (1.0 / down_channel_scales).to(torch.float16).cpu()
+    gate_up_channel_scales_inv = (1.0 / gate_up_channel_scales).to(dtype).cpu()
+    down_channel_scales_inv = (1.0 / down_channel_scales).to(dtype).cpu()
     if gate_up_channel_scales_inv.ndim == 1:
         gate_up_channel_scales_inv = gate_up_channel_scales_inv.unsqueeze(0)
     if down_channel_scales_inv.ndim == 1:
         down_channel_scales_inv = down_channel_scales_inv.unsqueeze(0)
 
     rotation_buffers = {
-        "gate_up_weight_theta": gate_up_theta.to(torch.float16).cpu(),
+        "gate_up_weight_theta": gate_up_theta.to(dtype).cpu(),
         "gate_up_weight_pairs": gate_up_pairs.cpu(),
         "gate_up_weight_channel_scales": gate_up_channel_scales_inv,
-        "down_weight_theta": down_theta.to(torch.float16).cpu(),
+        "down_weight_theta": down_theta.to(dtype).cpu(),
         "down_weight_pairs": down_pairs.cpu(),
         "down_weight_channel_scales": down_channel_scales_inv,
     }
@@ -410,6 +416,7 @@ def _inject_quantized_moe_state_dict(
 def _convert_real(
     model: torch.nn.Module,
     result_dir: Path,
+    dtype: torch.dtype = torch.float16,
 ) -> tuple[int, dict[str, Any] | None, dict[str, torch.Tensor]]:
     from paroquant.inference.backends.transformers.modules import RotateQuantizedLinear
 
@@ -425,7 +432,7 @@ def _convert_real(
                 continue
 
             sd = torch.load(pt_file, map_location="cpu", weights_only=False)
-            buffers, bits, group_size, krot = _quantize_layer(sd, device="cuda")
+            buffers, bits, group_size, krot = _quantize_layer(sd, device="cuda", dtype=dtype)
 
             rl = RotateQuantizedLinear(
                 module.in_features,
@@ -445,7 +452,7 @@ def _convert_real(
                 continue
 
             sd = torch.load(pt_file, weights_only=False, map_location="cpu")
-            buffers_moe, rotations_moe, bits_moe, group_size_moe, krot_moe = _quantize_moe(sd, device="cuda")
+            buffers_moe, rotations_moe, bits_moe, group_size_moe, krot_moe = _quantize_moe(sd, device="cuda", dtype=dtype)
             moe_entries.append((layer_idx, name, buffers_moe, rotations_moe))
             bits = bits or bits_moe
             group_size = group_size or group_size_moe
@@ -472,24 +479,36 @@ def main() -> None:
     parser.add_argument("--result-dir", type=str, required=True)
     parser.add_argument("--output-path", type=str, required=True)
     parser.add_argument("--mode", choices=["real", "pseudo"], default="real")
+    parser.add_argument(
+        "--dtype",
+        choices=["float16", "bfloat16"],
+        default="float16",
+        help="Floating-point dtype for saved model weights and quantization buffers "
+             "(scales, theta, channel_scales). Use float16 for sm75/Turing GPUs that "
+             "lack native bfloat16 support; use bfloat16 for sm80+ (Ampere and later) "
+             "when training in bfloat16 precision.",
+    )
     args = parser.parse_args()
 
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA required.")
+
+    _DTYPE_MAP = {"float16": torch.float16, "bfloat16": torch.bfloat16}
+    dtype = _DTYPE_MAP[args.dtype]
 
     result_dir = Path(args.result_dir)
     if not result_dir.is_dir():
         raise FileNotFoundError(f"Result directory not found: {result_dir}")
 
     source_dir = _resolve_source_dir(args.model)
-    model = _load_model(str(source_dir), device_map="cpu" if args.mode == "real" else "cuda")
+    model = _load_model(str(source_dir), device_map="cpu" if args.mode == "real" else "cuda", dtype=dtype)
 
     quant_config: dict[str, Any] | None = None
     save_state_dict: dict[str, torch.Tensor] | None = None
     if args.mode == "pseudo":
         count = _convert_pseudo(model, result_dir)
     else:
-        count, quant_config, save_state_dict = _convert_real(model, result_dir)
+        count, quant_config, save_state_dict = _convert_real(model, result_dir, dtype=dtype)
         model.config.quantization_config = quant_config
 
     if count == 0:
