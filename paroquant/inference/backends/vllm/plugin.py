@@ -7,6 +7,7 @@ from torch.nn import Parameter
 from vllm import _custom_ops as ops
 from vllm import envs
 from vllm.logger import init_logger
+from vllm.distributed import get_tensor_model_parallel_rank
 from vllm.model_executor.layers.linear import LinearBase, LinearMethodBase, UnquantizedLinearMethod
 from vllm.model_executor.layers.quantization import register_quantization_config
 from vllm.model_executor.layers.quantization.awq_marlin import AWQMarlinLinearMethod
@@ -50,6 +51,20 @@ def _rotation_weight_loader(
     """
     if loaded_shard_id is None:
         target = param.data[0] if param.data.dim() > loaded_weight.dim() else param.data
+        if target.shape != loaded_weight.shape:
+            # Row-parallel TP: the checkpoint stores full-size rotation params but
+            # this partition only covers a shard of the input dimension.  Slice
+            # along the last axis using the current tensor-parallel rank so that
+            # each worker loads the features it will actually receive at runtime.
+            shard_size = target.shape[-1]
+            full_size = loaded_weight.shape[-1]
+            if full_size % shard_size != 0:
+                raise ValueError(
+                    f"Rotation param last-dim {full_size} is not evenly divisible "
+                    f"by the per-partition size {shard_size}."
+                )
+            tp_rank = get_tensor_model_parallel_rank()
+            loaded_weight = loaded_weight[..., tp_rank * shard_size : (tp_rank + 1) * shard_size]
         target.copy_(loaded_weight)
         return
 
