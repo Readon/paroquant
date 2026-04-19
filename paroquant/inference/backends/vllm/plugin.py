@@ -30,6 +30,9 @@ logger = init_logger(__name__)
 _SHARD_INDEX = {"q": 0, "k": 1, "v": 2}
 _QUANT_TYPE = {4: scalar_types.uint4}
 _MARLIN_TILE_N = 64
+# Minimum token count at which dequantize+matmul outperforms the fused AWQ GEMM kernel.
+# Matches the heuristic used in vllm's AWQLinearMethod.
+_AWQ_GEMM_BATCH_THRESHOLD = 256
 
 
 def _rotation_weight_loader(
@@ -256,7 +259,9 @@ class ParoQuantAWQLinearMethod(LinearMethodBase):
             out_n = qweight.shape[-1] * pack_factor
             # Use dequantize + matmul for large batches or batch-invariant mode;
             # otherwise use the fused AWQ GEMM kernel (fp16 only).
-            if x_2d.shape[0] >= 256 or envs.VLLM_BATCH_INVARIANT or x_2d.dtype != torch.float16:
+            if x_2d.shape[0] >= _AWQ_GEMM_BATCH_THRESHOLD or envs.VLLM_BATCH_INVARIANT or x_2d.dtype != torch.float16:
+                # awq_dequantize(qweight, scales, qzeros, split_k_iters=0, thx=0, thy=0)
+                # split_k_iters=0 means auto-select; thx/thy=0 use default thread block dims.
                 dq = ops.awq_dequantize(qweight, scales, qzeros, 0, 0, 0)
                 return torch.matmul(x_2d.to(dq.dtype), dq)
             return ops.awq_gemm(x_2d, qweight, scales, qzeros, pack_factor)
