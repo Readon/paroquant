@@ -48,6 +48,12 @@ jobs:
             torch_cuda_arch_list: "8.0 8.6 8.7 8.9 9.0 10.0 12.0"
             platforms: linux/amd64
 
+          - tag: serve-cu129
+            target: serve
+            cuda_version: "12.9.1"
+            torch_cuda_arch_list: "8.0 8.6 8.7 8.9 9.0 10.0 12.0"
+            platforms: linux/amd64
+
           - tag: latest
             target: optim
             cuda_version: "13.0.2"
