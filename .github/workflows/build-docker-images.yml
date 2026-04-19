@@ -70,6 +70,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set lowercase repository name
+        run: echo "REPO_LOWER=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -90,7 +93,7 @@ jobs:
           file: docker/Dockerfile
           target: ${{ matrix.target }}
           push: true
-          tags: ghcr.io/${{ github.repository }}:${{ matrix.tag }}
+          tags: ghcr.io/${{ env.REPO_LOWER }}:${{ matrix.tag }}
           platforms: ${{ matrix.platforms }}
           build-args: |
             CUDA_VERSION=${{ matrix.cuda_version }}
