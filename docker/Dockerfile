@@ -79,16 +79,18 @@ ENTRYPOINT ["python", "-m", "paroquant.cli.serve"]
 # ---- serve-dflash: OpenAI-compatible vLLM API server with DFlash speculative decoding ----
 FROM base AS serve-dflash
 ENV VLLM_WORKER_MULTIPROC_METHOD=spawn
+ARG VLLM_VERSION=""
+ARG CUDA_TOOLKIT=""
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install \
         -e ".[vllm]" \
         "dflash[vllm] @ git+https://github.com/z-lab/dflash" \
-        --extra-index-url "https://wheels.vllm.ai/nightly" \
-        --extra-index-url "https://download.pytorch.org/whl/cu129" \
+        --extra-index-url "https://wheels.vllm.ai/${VLLM_VERSION:-nightly}" \
+        --extra-index-url "https://download.pytorch.org/whl/${CUDA_TOOLKIT:-cu129}" \
     && pip install -U vllm \
-        --extra-index-url "https://wheels.vllm.ai/nightly" \
-        --extra-index-url "https://download.pytorch.org/whl/cu129"
+        --extra-index-url "https://wheels.vllm.ai/${VLLM_VERSION:-nightly}" \
+        --extra-index-url "https://download.pytorch.org/whl/${CUDA_TOOLKIT:-cu129}"
 ENV TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas
 ENV TRITON_PTXAS_BLACKWELL_PATH=/usr/local/cuda/bin/ptxas
 ENTRYPOINT ["python", "-m", "paroquant.cli.serve"]
