@@ -63,6 +63,9 @@ dev = [
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
+[project.entry-points."vllm.general_plugins"]
+paroquant = "paroquant.inference.backends.vllm.plugin:register"
+
 [tool.setuptools.packages.find]
 include = ["paroquant*"]
 
