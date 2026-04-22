@@ -4,14 +4,13 @@ from paroquant.inference.base import detect_backend
 
 
 def _serve_vllm():
-    import asyncio
     import sys
 
-    from vllm.entrypoints.openai.api_server import (
-        FlexibleArgumentParser,
-        make_arg_parser,
-        run_server,
-    )
+    import uvloop
+    from vllm.entrypoints.openai.api_server import run_server
+    from vllm.entrypoints.openai.cli_args import make_arg_parser, validate_parsed_serve_args
+    from vllm.entrypoints.utils import cli_env_setup
+    from vllm.utils.argparse_utils import FlexibleArgumentParser
 
     print(
         "Note: The first run takes more time to load the model due to kernel compilation. The subsequent runs will be faster."
@@ -19,8 +18,12 @@ def _serve_vllm():
 
     import paroquant.inference.backends.vllm.plugin  # noqa: F401
 
+    # Replicate vllm's CLI serve startup sequence exactly so that all vllm
+    # features (including dflash speculative decoding) work as expected.
+    cli_env_setup()
     args = make_arg_parser(FlexibleArgumentParser()).parse_args(sys.argv[1:])
-    asyncio.run(run_server(args))
+    validate_parsed_serve_args(args)
+    uvloop.run(run_server(args))
 
 
 def _serve_mlx():
