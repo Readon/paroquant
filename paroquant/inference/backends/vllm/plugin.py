@@ -28,6 +28,16 @@ if TYPE_CHECKING:
 
 logger = init_logger(__name__)
 
+
+def register() -> None:
+    """Entry point called by vllm's load_general_plugins() in every worker process.
+
+    Importing this module is enough to register the paroquant quantization
+    config (via the @register_quantization_config decorator above), so this
+    function intentionally does nothing.  It exists solely to satisfy the
+    vllm.general_plugins entry-point protocol, which requires a callable.
+    """
+
 _SHARD_INDEX = {"q": 0, "k": 1, "v": 2}
 _QUANT_TYPE = {4: scalar_types.uint4}
 _MARLIN_TILE_N = 64
