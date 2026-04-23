@@ -11,6 +11,7 @@ from vllm.distributed import get_tensor_model_parallel_rank
 from vllm.model_executor.layers.linear import LinearBase, LinearMethodBase, UnquantizedLinearMethod
 from vllm.model_executor.layers.quantization import register_quantization_config
 from vllm.model_executor.layers.quantization.awq_marlin import AWQMarlinLinearMethod
+from transformers import PretrainedConfig
 from vllm.model_executor.layers.quantization.base_config import QuantizationConfig
 from vllm.model_executor.layers.quantization.utils.marlin_utils import (
     apply_awq_marlin_linear,
@@ -129,7 +130,7 @@ class ParoQuantConfig(QuantizationConfig):
             zero_point=cls.get_from_keys_or(config, ["zero_point"], True),
         )
 
-    def maybe_update_config(self, model_name: str, revision: str | None = None):
+    def maybe_update_config(self, model_name: str, hf_config: PretrainedConfig | None = None, revision: str | None = None):
         """Auto-detect unquantized layers from safetensors metadata."""
         if self.modules_to_not_convert:
             return
