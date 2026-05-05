@@ -1,3 +1,4 @@
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -9,7 +10,12 @@ _dir = Path(__file__).parent
 
 
 def _rotation_build_directory() -> Path:
-    cache_root = Path.home() / ".cache" / "paroquant" / "torch_extensions"
+    # Respect TORCH_EXTENSIONS_DIR if set, otherwise use default cache.
+    base = os.environ.get("TORCH_EXTENSIONS_DIR")
+    if base:
+        cache_root = Path(base)
+    else:
+        cache_root = Path.home() / ".cache" / "paroquant" / "torch_extensions"
     abi_tag = (
         f"py{sys.version_info.major}{sys.version_info.minor}_"
         f"torch{torch.__version__}_"

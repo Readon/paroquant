@@ -59,6 +59,9 @@ dev = [
     "pre-commit",
 ]
 
+[project.entry-points."vllm.general_plugins"]
+paroquant = "paroquant.inference.backends.vllm.plugin:register"
+
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
